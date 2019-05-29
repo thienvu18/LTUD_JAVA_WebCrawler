@@ -1,0 +1,29 @@
+body { font: 13px/1.5 "Trebuchet MS" , Arial, Helvetica, sans-serif; }
+a:focus { outline: 1px dotted invert; }
+hr { border: 0 #ccc solid; border-top-width: 1px; clear: both; height: 0; }
+h1 { font-size: 25px; }
+h2 { font-size: 23px; }
+h3 { font-size: 21px; }
+h4 { font-size: 19px; }
+h5 { font-size: 17px; }
+h6 { font-size: 15px; }
+ol { list-style: decimal; }
+ul { list-style: disc; }
+li { margin-left: 0px; }
+p, dl, hr, h1, h2, h3, h4, h5, h6, ol, ul, pre, table, address, fieldset { margin-bottom: 20px; }
+
+
+/*******************************************************************************
+  TOOLTIP 
+*******************************************************************************/
+/*a.tooltip span { z-index: 10; display: none; padding: 14px 20px; margin-top: -25px; margin-left: 20px; width: 180px; line-height: 18px; }
+a.tooltip:hover span { display: inline; position: absolute; color: #111; border: 1px solid #DCA; background: #fffAF0; }
+.callout { z-index: 20; position: absolute; top: 25px; border: 0; left: -12px; }
+a.tooltip span { border-radius: 4px; -moz-border-radius: 4px; -webkit-border-radius: 4px; -moz-box-shadow: 5px 5px 8px #CCC; -webkit-box-shadow: 5px 5px 8px #CCC; }*/
+a.tooltip span { z-index: 10; display: none; padding: 14px 20px; margin-top: -25px; margin-left: 20px; width: 180px; line-height: 18px; }
+a.tooltip:hover span { display: inline; position: absolute; color: #111; border: 1px solid #DCA; background: #fffAF0; }
+.callout { z-index: 20; position: absolute; top: 23px; border: 0; left: -12px; }
+a.tooltip span { border-radius: 4px; -moz-border-radius: 4px; -webkit-border-radius: 4px; -moz-box-shadow: 5px 5px 8px #CCC; -webkit-box-shadow: 5px 5px 8px #CCC; }
+
+
+
