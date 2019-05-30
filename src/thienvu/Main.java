@@ -1,6 +1,7 @@
 package thienvu;
 
 import org.jsoup.Jsoup;
+import org.jsoup.UnsupportedMimeTypeException;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -10,24 +11,33 @@ import java.net.URL;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.ReadableByteChannel;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.LinkedList;
-import java.util.Set;
+import java.util.*;
 
 public class Main {
 
-    private static final String base = "offline";
+    private static final String base = "offline/info.cern.ch";
     private static Set<String> linksToDownload;
+    private static Set<String> downloadedLinks;
     private static int numberOfThread;
 
     public static synchronized void addLink(String link) {
         linksToDownload.add(link);
     }
-
+    public static synchronized boolean setDownloadedLink(String link) {
+        return downloadedLinks.add(link);
+    }
     public static synchronized String removeLink() {
-        if (linksToDownload.isEmpty()) return "";
-        return (String) linksToDownload.toArray()[0];
+        if (linksToDownload.isEmpty()) return null;
+
+        Iterator iterator = linksToDownload.iterator();
+        String res = (String) iterator.next();
+        iterator.remove();
+
+        return res;
+    }
+
+    public static synchronized int getLinksSize() {
+        return linksToDownload.size();
     }
 
     public static synchronized void increaseNumberOfThread() {
@@ -41,8 +51,8 @@ public class Main {
     public static boolean downloadFile(String url, String filePath, String fileName) {
 
         new File(filePath).mkdirs();
-        File tmpDir = new File(filePath + "/" + fileName);
-        if (tmpDir.exists()) return true;
+        File file = new File(filePath + "/" + fileName);
+        if (file.exists()) return true;
 
         ReadableByteChannel readableByteChannel = null;
         try {
@@ -75,93 +85,127 @@ public class Main {
         return true;
     }
 
-    public static void test(String urlString) throws IOException {
-        final String urlStringTrimmed = urlString.lastIndexOf('/') == urlString.length() - 1 ? urlString.substring(0, urlString.length() - 1) : urlString;
-        final URL url = new URL(urlStringTrimmed);
-        final String path = url.getPath();
-        final String root = path.isEmpty() || !path.contains(".") ? base + path : base + path.substring(0, path.lastIndexOf('/') + 1);
-        final String filename = path.contains(".") ? path.substring(path.lastIndexOf('/') + 1) : "index.html";
-        final String domain = url.getHost();
-        final int degree = root.split("/", -1).length - 1;
-        final String relativeNotation = "../".repeat(degree);
+    //Retrun path like "/abc/xyz"
+    public static String getPathWithoutFilename(String pathWithFilename) {
+        if (pathWithFilename.equals("")) return "/";
+        if (!pathWithFilename.contains(".")) return pathWithFilename;
+        if (pathWithFilename.lastIndexOf("/") == pathWithFilename.indexOf("/")) return "/";
+        return pathWithFilename.substring(0, pathWithFilename.lastIndexOf("/"));
+    }
 
-        Document doc = Jsoup.connect(url.toString()).get();
-        Elements links = doc.select("a[href]");
-        Elements media = doc.select("[src]");
-        Elements imports = doc.select("link[href]");
+    //Retrun filename like "abc.xyz"
+    public static String getFileName(String pathWithFilename) {
+        if (pathWithFilename.equals("") || !pathWithFilename.contains(".")) return "index.html";
+        return pathWithFilename.substring(pathWithFilename.lastIndexOf("/") + 1);
+    }
 
-        // Xoá cái base để đường dẫn tương đối bắt đầu từ folder hiện tại
-        // https://html.com/attributes/base-href/
-        if (doc.head().children().select("base").size() > 0) {
-            doc.head().children().select("base").remove();
+    //Delete redundant "/" and "#"
+    public static String trimUrlString(String urlString) {
+        String url = urlString.trim();
+        if (url.equals("")) return url;
+        if (url.equals("#")) return "";
+        if (url.equals("/")) return url;
+
+        if (url.lastIndexOf('#') == url.length() - 1) {
+            url = url.substring(0, url.length() - 1);
+        }
+        if (url.lastIndexOf('/') == url.length() - 1) {
+            url = url.substring(0, url.length() - 1);
         }
 
-        for (Element src : media) {
-            final String fileUri = src.attr("abs:src");
+        return url;
+    }
 
-            String fileRelativeUri;
+    //Return absolute path like offline/abc/xyz
+    public static String getAbsoluteLocalFilePath(String basePath, String pathWithoutFilename) {
+        return basePath + pathWithoutFilename;
+    }
+
+    public static String getRelativeNotation(String absolutePath) {
+        final int degree = absolutePath.split("/", -1).length - 1;
+
+        if (degree <= 2) return "./";
+        return "../".repeat(degree - 2);
+    }
+
+    public static void ProcessMedium(String root, Elements medium) {
+        final String relativeNotation = getRelativeNotation(root);
+
+        for (Element media : medium) {
+            final String mediaUrl = media.attr("abs:src");
+
+            //If mediaUrl is whole url, we just get the path
+            String mediaRelativeUrl;
             try {
-                URL u = new URL(src.attr("src"));
-                fileRelativeUri = u.getPath();
+                URL u = new URL(media.attr("src"));
+                mediaRelativeUrl = u.getPath();
             } catch (Exception ignored) {
-                fileRelativeUri = src.attr("src");
+                final String rawSrc = trimUrlString(media.attr("src"));
+                mediaRelativeUrl = rawSrc.substring(0, rawSrc.indexOf('?') == -1 ? rawSrc.length() : rawSrc.indexOf('?'));
             }
+            mediaRelativeUrl = mediaRelativeUrl.substring(0, mediaRelativeUrl.indexOf('#') == -1 ? mediaRelativeUrl.length() : mediaRelativeUrl.indexOf('#'));
 
-            final String fileRelativeUriTrimmed = fileRelativeUri.substring(0, fileRelativeUri.indexOf('?') == -1 ? fileRelativeUri.length() : fileRelativeUri.indexOf('?'));
-
-            String filePath = fileRelativeUri.substring(0, fileRelativeUri.lastIndexOf('/'));
-            String fileName = fileRelativeUri.substring(fileRelativeUri.lastIndexOf('/') + 1, fileRelativeUri.indexOf('?') == -1 ? fileRelativeUri.length() : fileRelativeUri.indexOf('?'));
-
-            if (filePath.equals("")) continue;
+            String filePath = getPathWithoutFilename(mediaRelativeUrl);
+            String fileName = getFileName(mediaRelativeUrl);
 
             if (filePath.charAt(0) == '/') {
                 if (filePath.length() >= 2 && filePath.charAt(1) == '/') {
-                    src.attr("src", fileRelativeUriTrimmed.replaceFirst("//", relativeNotation));
-                    filePath = base + filePath.replaceFirst("/", "");
+                    media.attr("src", mediaRelativeUrl.replaceFirst("//", relativeNotation));
+                    filePath = getAbsoluteLocalFilePath(base, filePath.replaceFirst("/", ""));
                 } else {
-                    src.attr("src", fileRelativeUriTrimmed.replaceFirst("/", relativeNotation));
-                    filePath = base + filePath;
+                    media.attr("src", mediaRelativeUrl.replaceFirst("/", relativeNotation));
+                    filePath = getAbsoluteLocalFilePath(root, filePath);
                 }
             }
 
-            downloadFile(fileUri, filePath, fileName);
+            downloadFile(mediaUrl, filePath, fileName);
         }
+    }
 
-        for (Element link : imports) {
-            final String fileUri = link.attr("abs:href");
+    public static void ProcessImports(String root, Elements imports) {
+        final String relativeNotation = getRelativeNotation(root);
 
-            String fileRelativeUri;
+        for (Element file : imports) {
+            final String fileUrl = file.attr("abs:href");
+
+            String fileRelativeUrl;
             try {
-                URL u = new URL(link.attr("href"));
-                fileRelativeUri = u.getPath();
+                URL u = new URL(file.attr("href"));
+                fileRelativeUrl = u.getPath();
             } catch (Exception ignored) {
-                fileRelativeUri = link.attr("href");
+                final String rawSrc = trimUrlString(file.attr("href"));
+                fileRelativeUrl = rawSrc.substring(0, rawSrc.indexOf('?') == -1 ? rawSrc.length() : rawSrc.indexOf('?'));
             }
+            fileRelativeUrl = fileRelativeUrl.substring(0, fileRelativeUrl.indexOf('#') == -1 ? fileRelativeUrl.length() : fileRelativeUrl.indexOf('#'));
 
-            String filePath = fileRelativeUri.substring(0, fileRelativeUri.lastIndexOf('/'));
-            String fileName = fileRelativeUri.substring(fileRelativeUri.lastIndexOf('/') + 1, fileRelativeUri.indexOf('?') == -1 ? fileRelativeUri.length() : fileRelativeUri.indexOf('?'));
+            String filePath = getPathWithoutFilename(fileRelativeUrl);
+            String fileName = getFileName(fileRelativeUrl);
 
             if (filePath.charAt(0) == '/') {
                 String newLink;
 
                 if (filePath.length() >= 2 && filePath.charAt(1) == '/') {
-                    newLink = fileRelativeUri.replaceFirst("//", relativeNotation);
-                    filePath = base + filePath.replaceFirst("/", "");
+                    newLink = fileRelativeUrl.replaceFirst("//", relativeNotation);
+                    filePath = getAbsoluteLocalFilePath(base, filePath.replaceFirst("/", ""));
                 } else {
-                    newLink = fileRelativeUri.replaceFirst("/", relativeNotation);
-                    filePath = base + filePath;
+                    newLink = fileRelativeUrl.replaceFirst("/", relativeNotation);
+                    filePath = getAbsoluteLocalFilePath(root, filePath);
                 }
 
-                link.attr("href", newLink);
+                file.attr("href", newLink);
             }
 
-            downloadFile(fileUri, filePath, fileName);
+            downloadFile(fileUrl, filePath, fileName);
         }
+    }
+
+    public static void ProcessLinks(String root, String originDomain,  Elements links) {
+        final String relativeNotation = getRelativeNotation(root);
 
         for (Element link : links) {
             try {
                 URL u = new URL(link.attr("abs:href"));
-                if (!u.getHost().equals(domain)) {
+                if (!u.getHost().equals(originDomain)) {
                     continue;
                 }
             } catch (Exception ignored) {
@@ -170,74 +214,99 @@ public class Main {
             if (link.attr("href").equals("") || link.attr("href").charAt(0) == '#')
                 continue;
 
-            String fileRelativeUri;
+            final String absoluteLink = trimUrlString(link.attr("abs:href"));
+
+            String relativeLink;
             try {
                 URL u = new URL(link.attr("href"));
-                fileRelativeUri = u.getPath();
+                relativeLink = u.getPath();
             } catch (Exception ignored) {
-                fileRelativeUri = link.attr("href");
+                final String rawSrc = trimUrlString(link.attr("href"));
+                relativeLink = rawSrc.substring(0, rawSrc.indexOf('?') == -1 ? rawSrc.length() : rawSrc.indexOf('?'));
             }
+            relativeLink = relativeLink.substring(0, relativeLink.indexOf('#') == -1 ? relativeLink.length() : relativeLink.indexOf('#'));
 
-            if (fileRelativeUri.contains("#")) {
-                addLink(link.attr("abs:href").substring(0, fileRelativeUri.lastIndexOf('#')));
-            } else {
-                addLink(link.attr("abs:href"));
-            }
-
-            String filePath;
-            if (!fileRelativeUri.contains(".")) {
-                filePath = fileRelativeUri;
-            } else {
-                filePath = fileRelativeUri.substring(0, fileRelativeUri.lastIndexOf('/'));
-            }
+            String filePath = getPathWithoutFilename(relativeLink);
 
             if (filePath.isEmpty()) {
                 link.attr("href", "./");
             } else if (filePath.charAt(0) == '/') {
-                String newLink;
-
-                if (filePath.length() >= 2 && filePath.charAt(1) == '/') {
-                    newLink = fileRelativeUri.replaceFirst("//", relativeNotation);
-                } else {
-                    newLink = fileRelativeUri.replaceFirst("/", relativeNotation);
-                }
+                String newLink = relativeLink;
 
                 if (!newLink.contains(".")) {
                     newLink += "/index.html";
                 }
 
+                if (filePath.length() >= 2 && filePath.charAt(1) == '/') {
+                    newLink = newLink.replaceFirst("//", relativeNotation);
+                } else {
+                    newLink = newLink.replaceFirst("/", relativeNotation);
+                }
+
                 link.attr("href", newLink);
             }
-        }
 
-        new File(root).mkdirs();
-        PrintWriter out = new PrintWriter(root + "/" + filename);
-        out.println(doc.toString());
-        out.close();
+            if (setDownloadedLink(absoluteLink)) {
+                addLink(absoluteLink);
+            }
+        }
+    }
+
+    public static void test(String urlString) throws IOException {
+        final URL url = new URL(urlString);
+        final String filepath = getPathWithoutFilename(url.getPath());
+        final String filename = getFileName(url.getPath());
+        final String root = getAbsoluteLocalFilePath(base, filepath);
+        final String domain = url.getHost();
+
+        try {
+            Document doc = Jsoup.connect(url.toString()).get();
+            Elements links = doc.select("a[href]");
+            Elements medium = doc.select("[src]");
+            Elements imports = doc.select("link[href]");
+
+            // Xoá cái base để đường dẫn tương đối bắt đầu từ folder hiện tại
+            // https://html.com/attributes/base-href/
+            if (doc.head().children().select("base").size() > 0) {
+                doc.head().children().select("base").remove();
+            }
+
+            ProcessMedium(root, medium);
+            ProcessImports(root, imports);
+            ProcessLinks(root,domain, links);
+
+            new File(root).mkdirs();
+            PrintWriter out = new PrintWriter(root + "/" + filename);
+            out.println(doc.toString());
+            out.close();
+        } catch (UnsupportedMimeTypeException e) {
+            downloadFile(url.toString(), root, filename);
+        }
     }
 
     public static void main(String[] args) throws IOException {
-        final int maxThreadCount = 5;
+        final int maxThreadCount = 10;
 
         numberOfThread = 0;
-        linksToDownload = new HashSet<>();
-        addLink("https://www.hcmus.edu.vn");
+        linksToDownload = new LinkedHashSet<>();
+        downloadedLinks = new HashSet<>();
+        addLink("http://info.cern.ch/");
 
-        while (true) {
-            if (numberOfThread == 0 && linksToDownload.size() == 0) break;
-            if (numberOfThread > maxThreadCount) continue;
+        while (numberOfThread != 0 || getLinksSize() != 0) {
+            if (numberOfThread >= maxThreadCount) continue;
 
             String link = removeLink();
-            if (link.equals("")) continue;
+            if (link == null) continue;
 
             increaseNumberOfThread();
+            System.out.println("Number of thread: " + numberOfThread);
             Thread thread = new Thread(() -> {
                 System.out.println("Thread start");
                 try {
                     System.out.println("Downloading " + link);
                     test(link);
                     System.out.println("Done download " + link);
-                } catch (IOException e) {
+                } catch (Exception e) {
                     e.printStackTrace();
                     System.out.println("Error download " + link);
                 }
@@ -245,19 +314,9 @@ public class Main {
                 decreaseNumberOfThread();
                 System.out.println("Thread done");
             });
+            System.out.println(thread.getName());
             thread.start();
         }
-    }
-
-    private static void print(String msg, Object... args) {
-        System.out.println(String.format(msg, args));
-    }
-
-    private static String trim(String s, int width) {
-        if (s.length() > width)
-            return s.substring(0, width - 1) + ".";
-        else
-            return s;
     }
 
 }
